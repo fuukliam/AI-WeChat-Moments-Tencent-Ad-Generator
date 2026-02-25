@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 批量图文生成系统</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- 引入 Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入 html2canvas 用于截图 -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <!-- 字体图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div id="app">
+        <!-- 侧边栏：控制面板 -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <h1>AI 生成工坊</h1>
+            </div>
+
+            <div class="control-group">
+                <label>输入公司名称 (每行一个)</label>
+                <textarea v-model="inputRaw" placeholder="例如：
+星河科技有限公司
+云端未来的家
+绿色动力新能源..."></textarea>
+            </div>
+
+            <div class="control-group">
+                <label>设置</label>
+                <div class="setting-item">
+                    <span>图片比例 (生成尺寸)</span>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" v-model="aspectRatio" value="horizontal">
+                            <span>横版 (540x305)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" v-model="aspectRatio" value="vertical">
+                            <span>竖版 (320x560)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <span>生成模式</span>
+                    <select v-model="mode">
+                        <option value="simulation">⚡️ 极速模拟 (免费)</option>
+                        <option value="ai">🧠 真实 AI (需运行代理)</option>
+                    </select>
+                </div>
+                <!-- API Key Input Removed: Hardcoded in server.js -->
+            </div>
+
+            <div class="actions">
+                <button @click="generateBatch" :disabled="isGenerating || !inputRaw.trim()" class="btn-primary">
+                    <span v-if="isGenerating"><i class="fa-solid fa-spinner fa-spin"></i> 生成中...</span>
+                    <span v-else>开始批量生成</span>
+                </button>
+
+                <!-- Progress Bar -->
+                <div v-if="isGenerating" class="progress-section">
+                    <div class="progress-container">
+                        <div class="progress-bar" :style="{ width: progressPercent + '%' }"></div>
+                    </div>
+                    <div class="progress-text">正在生成: {{ processedCount }} / {{ totalCount }}</div>
+                </div>
+            </div>
+
+            <div class="stats" v-if="results.length > 0">
+                <p>已生成: {{ results.length }} / {{ companyList.length }}</p>
+                <button @click="downloadAll" class="btn-secondary">下载全部 (ZIP)</button>
+            </div>
+        </aside>
+
+        <!-- 主区域：预览展示 -->
+        <main class="preview-area">
+            <div class="header">
+                <h2>生成结果预览</h2>
+                <div class="view-controls">
+                    <!-- 预留视图切换按钮 -->
+                </div>
+            </div>
+
+            <div class="cards-container" id="capture-container">
+                <div v-if="results.length === 0" class="empty-state">
+                    <i class="fa-regular fa-image"></i>
+                    <p>暂无生成记录</p>
+                    <p style="font-size: 12px; margin-top: 5px;">在左侧输入公司名称并点击生成</p>
+                </div>
+
+                <!-- 生成的卡片 -->
+                <div v-for="(item, index) in results" :key="index" class="promo-card native-style"
+                    :id="'card-' + index">
+                    <!-- left: Avatar -->
+                    <div class="card-left">
+                        <img :src="proxified(item.logo)" class="company-logo" alt="Logo"
+                            @click="regenerateImage(index, 'logo')">
+                    </div>
+
+                    <!-- right: Content -->
+                    <div class="card-right">
+                        <!-- Name & Ad Tag -->
+                        <div class="right-header">
+                            <div contenteditable="true" class="company-name-input"
+                                @input="item.name = $event.target.innerText">{{ item.name }}</div>
+                            <span class="ad-tag">广告 <i class="fa-solid fa-angle-down"></i></span>
+                        </div>
+
+                        <!-- Copy -->
+                        <div class="right-copy">
+                            <!-- Copy Input (ContentEditable Div for auto-height & full capture) -->
+                            <div contenteditable="true" class="native-copy-input"
+                                @input="item.copy = $event.target.innerText">{{ item.copy }}</div>
+                        </div>
+
+                        <!-- Visuals -->
+                        <div class="right-visual" :class="item.orientation">
+                            <div class="visual-box" :style="{ backgroundImage: 'url(' + proxified(item.image1) + ')' }">
+                                <div :class="'poster-slogan slogan-style-' + (item.sloganStyle || 0)"
+                                    v-if="item.slogan">{{ item.slogan }}</div>
+                                <div class="img-control" data-html2canvas-ignore="true">
+                                    <button @click="regenerateImage(index, 'image1')" title="重新生成图片"><i
+                                            class="fa-solid fa-arrows-rotate"></i></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Footer Actions -->
+                        <div class="right-footer">
+                            <div class="footer-link">
+                                <img src="xcxtb.png" class="link-icon" alt="icon">
+                                <span class="link-text">查看详情</span>
+                                <i class="fa-solid fa-angle-right link-arrow"></i>
+                            </div>
+                            <div class="footer-info">
+                                <span class="time-text">6小时前</span>
+                                <div class="action-icon">
+                                    <div class="dot"></div>
+                                    <div class="dot"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 引入jszip用于打包下载 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>
